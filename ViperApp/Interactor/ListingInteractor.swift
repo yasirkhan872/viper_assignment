@@ -14,52 +14,34 @@ protocol ListingInteractorProtocol: AnyObject {
 
 class ListingInteractor: ListingInteractorProtocol {
     weak var presenter: ListingPresenterProtocol?
-    
-    private let realm = try! Realm()
+    private let networkService: NetworkServiceProtocol
+    private let databaseService: DatabaseServiceProtocol
 
-    func fetchUniversities() {
-        let url = URL(string: "http://universities.hipolabs.com/search?country=United%20Arab%20Emirates")!
-        
-        let task = URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
-            if let error = error {
-                DispatchQueue.main.async {
-                    self?.fetchUniversitiesFromDatabase(with: error.localizedDescription)
-                }
-                return
-            }
-            guard let data = data else {
-                DispatchQueue.main.async {
-                    self?.fetchUniversitiesFromDatabase(with: "No data received from the API")
-                }
-                return
-            }
-            do {
-                let universities = try JSONDecoder().decode([University].self, from: data)
-                DispatchQueue.main.async {
-                    self?.saveToDatabase(universities)
-                    self?.presenter?.didFetchUniversities(universities)
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self?.fetchUniversitiesFromDatabase(with: error.localizedDescription)
-                }
-            }
-        }
-        task.resume()
+    init(networkService: NetworkServiceProtocol = NetworkService(), databaseService: DatabaseServiceProtocol = DatabaseService()) {
+        self.networkService = networkService
+        self.databaseService = databaseService
     }
 
-    private func saveToDatabase(_ universities: [University]) {
-        try! realm.write {
-            realm.add(universities, update: .modified)
+    func fetchUniversities() {
+        networkService.fetchUniversities { [weak self] result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let universities):
+                    self?.databaseService.saveUniversities(universities)
+                    self?.presenter?.didFetchUniversities(universities)
+                case .failure(let error):
+                    self?.fetchUniversitiesFromDatabase(with: error.localizedDescription)
+                }
+            }
         }
     }
 
     private func fetchUniversitiesFromDatabase(with errorMessage: String) {
-        let universities = realm.objects(University.self)
+        let universities = databaseService.fetchUniversities()
         if universities.isEmpty {
             presenter?.didFailToFetchUniversities(errorMessage)
         } else {
-            presenter?.didFetchUniversities(Array(universities))
+            presenter?.didFetchUniversities(universities)
         }
     }
 }
